@@ -12,7 +12,7 @@ var mysql = require('mysql');
 var connection = mysql.createConnection({
   host: 'localhost',
   user: 'root',
-  password : 'xve586',
+  password : '',
   database : 'test'
 });
 
@@ -29,15 +29,27 @@ prompt.start();
 
 debug('Scavenger session start');
 
-prompt.get([{name:'Username'}, {name:'Password', hidden: true}],function(err, result) {
-  if(err) {
-    debug('User cancelled');
-    debug(err);
-    process.exit(1);
+prompt.get(
+  [
+    {name:'Username'},
+    {name:'Password', hidden: true},
+    {name:'DBPassword', hidden: true}
+  ],function(err, result) {
+    if(err) {
+      debug('User cancelled');
+      debug(err);
+      process.exit(1);
+    }
+    connection = mysql.createConnection({
+      host: 'localhost',
+      user: 'root',
+      password : result.DBPassword,
+      database : 'test'
+    })
+    dbc = new deathByCaptcha(result.Username, result.Password);
+    next();
   }
-  dbc = new deathByCaptcha(result.Username, result.Password);
-  next();
-});
+);
 
 
 function next(){
