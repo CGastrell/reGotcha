@@ -17,7 +17,8 @@ var connection = mysql.createConnection({
 });
 
 
-
+var MAX = 10;
+var lastCount = 0;
 var baseUrl = 'http://www.sssalud.gov.ar/index/';
 var sssurl = 'http://www.sssalud.gov.ar/index/index.php?opc=bus650&user=GRAL&cat=consultas';
 var picUrl = 'http://www.sssalud.gov.ar/index/simage/secureimage_show.php=sid=';
@@ -54,6 +55,10 @@ prompt.get(
 
 function next(){
   console.log("/////////////////////////////////////////////////////////");
+  if(MAX > 0 && lastCount > MAX) {
+    debug('Reached max jobs, aborting');
+    process.exit(0);
+  }
   debug('Requesting job...');
   getNextJob(function(jobData, skip){
     if(!jobData) {
@@ -69,7 +74,7 @@ function next(){
       return next();
     }
 
-    capture(jobData, function(err, data){
+    capture(jobData.DNI, function(err, data){
       if(err) {
         debug('Capture error. Last id was %s', jobData.id);
         debug(err);
@@ -87,7 +92,7 @@ function next(){
           debug('Mysql error. Last id was %s', jobData.id);
           throw err;
         }
-
+        lastCount++;
         next();
       });
 
