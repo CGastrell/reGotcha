@@ -3,6 +3,7 @@ var cheerio = require('cheerio');
 var debug = require('debug')('scavenger');
 var fs = require('fs');
 var deathByCaptcha = require('./lib/dbc');
+var Mailer = require('./lib/mailer');
 var prompt = require('prompt');
 // var monk = require('monk')
 // var db = monk("scavenger:xve586@ds033459.mongolab.com:33459/cacarulo");
@@ -17,7 +18,7 @@ var connection = mysql.createConnection({
 });
 
 
-var MAX = 10;
+var MAX = 0;
 var lastCount = 0;
 var baseUrl = 'http://www.sssalud.gov.ar/index/';
 var sssurl = 'http://www.sssalud.gov.ar/index/index.php?opc=bus650&user=GRAL&cat=consultas';
@@ -26,14 +27,16 @@ var captchaFile = 'k.png';
 var captureDir = "captures/";
 
 var dbc = null;
+var mailer = null;
 prompt.start();
 
 debug('Scavenger session start');
 
 prompt.get(
   [
-    {name:'Username'},
-    {name:'Password', hidden: true},
+    {name:'DBCUsername'},
+    {name:'DBCPassword', hidden: true},
+    {name:'MailPassword', hidden: true},
     {name:'DBPassword', hidden: true}
   ],function(err, result) {
     if(err) {
@@ -41,13 +44,16 @@ prompt.get(
       debug(err);
       process.exit(1);
     }
+    if(result.MailPassword) {
+      mailer = new Mailer({pass: result.MailPassword});
+    }
     connection = mysql.createConnection({
       host: 'localhost',
       user: 'root',
       password : result.DBPassword,
       database : 'test'
     })
-    dbc = new deathByCaptcha(result.Username, result.Password);
+    dbc = new deathByCaptcha(result.DBCUsername, result.DBCPassword);
     next();
   }
 );
@@ -55,15 +61,41 @@ prompt.get(
 
 function next(){
   console.log("/////////////////////////////////////////////////////////");
-  if(MAX > 0 && lastCount > MAX) {
+  if(1 == 1 || MAX > 0 && lastCount > MAX) {
     debug('Reached max jobs, aborting');
-    process.exit(0);
+    mailer && mailer.sendMail(
+      {
+        subject:'MAX jobs reached',
+        content: "Congrats "+lastCount
+      },
+      function(err, info){
+        console.log(arguments);
+        process.exit(0);
+      }
+    );
+    return;
   }
   debug('Requesting job...');
-  getNextJob(function(jobData, skip){
+  getNextJob(function(jobErr, jobData, skip){
+    if(jobErr){
+      debug('Some error with the DB halted the execution');
+      mailer && mailer.sendMail({subject:'DB Error', content: jobErr}, function(err, info){
+        console.log(arguments);
+        process.exit(1);
+      });
+    }
     if(!jobData) {
-      debug('All targets processed or some failure checking database. Exiting.');
-      process.exit(0);
+      debug('All targets processed. Exiting after %s jobs processed', lastCount);
+      mailer && mailer.sendMail(
+        {
+          subject:'Queue finished',
+          content: "Congrats "+lastCount
+        },
+        function(err, info){
+          console.log(arguments);
+          process.exit(0);
+        }
+      );
     }
 
     debug('Got job data');
@@ -74,7 +106,7 @@ function next(){
       return next();
     }
 
-    capture(jobData.DNI, function(err, data){
+    capture(jobData.payload, function(err, data){
       if(err) {
         debug('Capture error. Last id was %s', jobData.id);
         debug(err);
@@ -198,40 +230,41 @@ function getNextJob(cb) {
   debug('Transaction begun...');
   connection.beginTransaction(function(transactionErr){
     if(transactionErr) {
-      throw transactionErr;
+      return cb && cb(transactionErr);
     }
     connection.query('SET autocommit = 0', function(setErr, setResult){
+      if (setErr) {
+        return cb && cb(setErr);
+      }
 
-
-      connection.query('SELECT id, DNI FROM KoKo WHERE done = ? LIMIT 1 FOR UPDATE', [0], function(err, result) {
+      connection.query('SELECT id, payload FROM jobs WHERE done = ? LIMIT 1 FOR UPDATE', [0], function(err, result) {
         if (err) {
-          debug('Mysql error. Last id was %s', lastId);
-          throw err;
+          return cb && cb(err);
         }
         if(result.length < 1) {
-          return cb && cb(false);
+          return cb && cb(null, null);
         }
         row = result[0];
         debug('Got job row %s',row);
-        connection.query('UPDATE KoKo SET done = ? WHERE id = ? LIMIT 1' ,[1, row.id], function(updErr, updResult){
+        connection.query('UPDATE jobs SET done = ? WHERE id = ? LIMIT 1' ,[1, row.id], function(updErr, updResult){
           if(updErr) {
-            throw updErr;
+            return cb && cb(updErr);
           }
           debug('Job row removed from queue');
 
           connection.commit(function(commitErr){
             if(commitErr) {
               return connection.rollback(function() {
-                throw commitErr;
+                return cb && cb(commitErr);
               });
             }
             debug('Transaction ended');
-            connection.query('SELECT du_cuil FROM oss WHERE du_cuil = ?',[row.DNI], function(ossErr,ossResult){
+            connection.query('SELECT du_cuil FROM oss WHERE du_cuil = ?',[row.payload], function(ossErr,ossResult){
               if(ossErr) {
-                throw ossErr;
+                return cb && cb(ossErr);
               }
 
-              return cb && cb(row, ossResult.length > 0);
+              return cb && cb(null, row, ossResult.length > 0);
             });
 
           }); // commit
