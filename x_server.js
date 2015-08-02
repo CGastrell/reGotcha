@@ -61,7 +61,7 @@ prompt.get(
 
 function next(){
   console.log("/////////////////////////////////////////////////////////");
-  if(1 == 1 || MAX > 0 && lastCount > MAX) {
+  if(MAX > 0 && lastCount > MAX) {
     debug('Reached max jobs, aborting');
     mailer && mailer.sendMail(
       {
