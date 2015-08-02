@@ -253,7 +253,7 @@ function getNextJob(cb) {
           return cb && cb(null, null);
         }
         row = result[0];
-        debug('Got job row %s',row);
+        debug('Got job row %s',row.id);
         connection.query('UPDATE jobs SET done = ? WHERE id = ? LIMIT 1' ,[1, row.id], function(updErr, updResult){
           if(updErr) {
             return cb && cb(updErr);
