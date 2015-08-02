@@ -10,12 +10,7 @@ var prompt = require('prompt');
 
 
 var mysql = require('mysql');
-var connection = mysql.createConnection({
-  host: 'localhost',
-  user: 'root',
-  password : '',
-  database : 'test'
-});
+var connection = null;
 
 
 var MAX = 0;
@@ -28,6 +23,8 @@ var captureDir = "captures/";
 
 var dbc = null;
 var mailer = null;
+var cancelNextRound = false;
+
 prompt.start();
 
 debug('Scavenger session start');
@@ -54,6 +51,25 @@ prompt.get(
       database : 'test'
     })
     dbc = new deathByCaptcha(result.DBCUsername, result.DBCPassword);
+
+    //graceful shutdown
+    var keypress = require('keypress');
+
+    // make `process.stdin` begin emitting "keypress" events
+    keypress(process.stdin);
+
+    // listen for the "keypress" event
+    process.stdin.on('keypress', function (ch, key) {
+      // console.log('got "keypress"', key);
+      if (key && key.ctrl && key.name == 'c') {
+        console.log('Abort by user. Powering off ...')
+        process.stdin.pause();
+        cancelNextRound = true;
+      }
+    });
+
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
     next();
   }
 );
@@ -61,6 +77,10 @@ prompt.get(
 
 function next(){
   console.log("/////////////////////////////////////////////////////////");
+  if(cancelNextRound) {
+    debug('Exit');
+    process.exit(0);
+  }
   if(MAX > 0 && lastCount > MAX) {
     debug('Reached max jobs, aborting');
     mailer && mailer.sendMail(
@@ -111,6 +131,11 @@ function next(){
 
     if(skip) {
       debug('Skipping job, already in DB');
+      return next();
+    }
+
+    if(!jobData.payload) {
+      debug('Skipping job, empty payload');
       return next();
     }
 
