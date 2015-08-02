@@ -4,8 +4,6 @@ var debug = require('debug')('scavenger');
 var fs = require('fs');
 var deathByCaptcha = require('./lib/dbc');
 var prompt = require('prompt');
-// var monk = require('monk')
-// var db = monk("scavenger:xve586@ds033459.mongolab.com:33459/cacarulo");
 
 
 var mysql = require('mysql');
