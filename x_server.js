@@ -3,10 +3,7 @@ var cheerio = require('cheerio');
 var debug = require('debug')('scavenger');
 var fs = require('fs');
 var deathByCaptcha = require('./lib/dbc');
-var Mailer = require('./lib/mailer');
 var prompt = require('prompt');
-// var monk = require('monk')
-// var db = monk("scavenger:xve586@ds033459.mongolab.com:33459/cacarulo");
 
 
 var mysql = require('mysql');
@@ -22,7 +19,6 @@ var captchaFile = 'k.png';
 var captureDir = "captures/";
 
 var dbc = null;
-var mailer = null;
 var cancelNextRound = false;
 
 prompt.start();
@@ -33,16 +29,12 @@ prompt.get(
   [
     {name:'DBCUsername'},
     {name:'DBCPassword', hidden: true},
-    {name:'MailPassword', hidden: true},
     {name:'DBPassword', hidden: true}
   ],function(err, result) {
     if(err) {
       debug('User cancelled');
       debug(err);
       process.exit(1);
-    }
-    if(result.MailPassword) {
-      mailer = new Mailer({pass: result.MailPassword});
     }
     connection = mysql.createConnection({
       host: 'localhost',
@@ -62,7 +54,7 @@ prompt.get(
     process.stdin.on('keypress', function (ch, key) {
       // console.log('got "keypress"', key);
       if (key && key.ctrl && key.name == 'c') {
-        console.log('Abort by user. Powering off ...')
+        debug('Abort by user. Powering off ...')
         process.stdin.pause();
         cancelNextRound = true;
       }
@@ -83,47 +75,19 @@ function next(){
   }
   if(MAX > 0 && lastCount > MAX) {
     debug('Reached max jobs, aborting');
-    mailer && mailer.sendMail(
-      {
-        subject:'MAX jobs reached',
-        content: "Congrats "+lastCount
-      },
-      function(err, info){
-        console.log(arguments);
-        process.exit(0);
-      }
-    );
+    process.exit(0);
     return;
   }
   debug('Requesting job...');
   getNextJob(function(jobErr, jobData, skip){
     if(jobErr){
       debug('Some error with the DB halted the execution');
-      if(mailer) {
-        mailer.sendMail({subject:'DB Error', content: jobErr}, function(err, info){
-          console.log(arguments);
-          process.exit(1);
-        });
-      }else{
-        process.exit(1);
-      }
+      debug(jobErr);
+      process.exit(1);
     }
     if(!jobData) {
       debug('All targets processed. Exiting after %s jobs processed', lastCount);
-      if(mailer) {
-        mailer.sendMail(
-          {
-            subject:'Queue finished',
-            content: "Congrats "+lastCount
-          },
-          function(err, info){
-            console.log(arguments);
-            process.exit(0);
-          }
-        );
-      }else{
-        process.exit(0);
-      }
+      process.exit(0);
     }
 
     debug('Got job data');
@@ -143,7 +107,16 @@ function next(){
       if(err) {
         debug('Capture error. Last id was %s', jobData.id);
         debug(err);
-        process.exit(1);
+        rollbackJob(jobData.id, function(rollbackErr, rollbackResult){
+          if(rollbackErr) {
+            debug('MySql error, could not rollback job ID %s', jobData.id);
+          }else{
+            debug('Job ID %s set to undone.', jobData.id);
+          }
+          debug('Quitting now.');
+          process.exit(1);
+        });
+        return;
       }
 
       if(data.os_fecha_alta) {
@@ -155,6 +128,9 @@ function next(){
       connection.query('INSERT INTO oss SET ?', data, function(err, result) {
         if (err) {
           debug('Mysql error. Last id was %s', jobData.id);
+          debug('Job was completed but could not write results');
+          debug('Should rollback with:');
+          debug('UPDATE jobs SET done = 0 WHERE id = %s', jobData.id);
           throw err;
         }
         lastCount++;
@@ -257,6 +233,15 @@ function capture(identifier, callback) {
   });
 }
 
+function rollbackJob(id, callback) {
+  debug('Rolling back job ID %s', id);
+  connection.query('UPDATE jobs SET done = 0 WHERE id = ?',[id], function(err, result){
+    if(err) {
+      return callback && callback(err);
+    }
+    return callback && callback();
+  });
+}
 
 function getNextJob(cb) {
   var row = null;
