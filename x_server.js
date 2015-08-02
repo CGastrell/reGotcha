@@ -79,23 +79,31 @@ function next(){
   getNextJob(function(jobErr, jobData, skip){
     if(jobErr){
       debug('Some error with the DB halted the execution');
-      mailer && mailer.sendMail({subject:'DB Error', content: jobErr}, function(err, info){
-        console.log(arguments);
+      if(mailer) {
+        mailer.sendMail({subject:'DB Error', content: jobErr}, function(err, info){
+          console.log(arguments);
+          process.exit(1);
+        });
+      }else{
         process.exit(1);
-      });
+      }
     }
     if(!jobData) {
       debug('All targets processed. Exiting after %s jobs processed', lastCount);
-      mailer && mailer.sendMail(
-        {
-          subject:'Queue finished',
-          content: "Congrats "+lastCount
-        },
-        function(err, info){
-          console.log(arguments);
-          process.exit(0);
-        }
-      );
+      if(mailer) {
+        mailer.sendMail(
+          {
+            subject:'Queue finished',
+            content: "Congrats "+lastCount
+          },
+          function(err, info){
+            console.log(arguments);
+            process.exit(0);
+          }
+        );
+      }else{
+        process.exit(0);
+      }
     }
 
     debug('Got job data');
